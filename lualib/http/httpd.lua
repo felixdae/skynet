@@ -95,7 +95,7 @@ local function readall(readbytes, bodylimit)
 		end
 	end
 
-	return 200, url, method, header, body
+	return 200, httpver, url, method, header, body
 end
 
 function httpd.read_request(...)
