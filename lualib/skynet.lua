@@ -52,6 +52,7 @@ local watching_service = {}
 local watching_session = {}
 local dead_service = {}
 local error_queue = {}
+local fork_queue = {}
 
 -- suspend is function
 local suspend
@@ -400,7 +401,9 @@ local function yield_call(service, session)
 	watching_session[session] = service
 	local succ, msg, sz = coroutine_yield("CALL", session)
 	watching_session[session] = nil
-	assert(succ, debug.traceback())
+	if not succ then
+		error(debug.traceback())
+	end
 	return msg,sz
 end
 
@@ -467,8 +470,6 @@ function skynet.dispatch_unknown_response(unknown)
 	unknown_response = unknown
 	return prev
 end
-
-local fork_queue = {}
 
 local tunpack = table.unpack
 
