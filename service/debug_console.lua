@@ -48,14 +48,18 @@ local function split_cmdline(cmdline)
 	return split
 end
 
-local function docmd(cmdline, print)
+local function docmd(cmdline, print, fd)
 	local split = split_cmdline(cmdline)
-	local cmd = COMMAND[split[1]]
+	local command = split[1]
+	if command == "debug" then
+		table.insert(split, fd)
+	end
+	local cmd = COMMAND[command]
 	local ok, list
 	if cmd then
 		ok, list = pcall(cmd, select(2,table.unpack(split)))
 	else
-		ok, list = pcall(skynet.call,".launcher","lua", table.unpack(split))
+		print("Invalid command, type help for command list")
 	end
 
 	if ok then
@@ -82,7 +86,7 @@ local function console_main_loop(stdin, print)
 			break
 		end
 		if cmdline ~= "" then
-			docmd(cmdline, print)
+			docmd(cmdline, print, stdin)
 		end
 	end
 	socket.unlock(stdin)
@@ -124,6 +128,8 @@ function COMMAND.help()
 		logon = "logon address",
 		logoff = "logoff address",
 		log = "launch a new lua service with log",
+		debug = "debug address : debug a lua service",
+		signal = "signal address sig",
 	}
 end
 
@@ -165,9 +171,29 @@ end
 
 local function adjust_address(address)
 	if address:sub(1,1) ~= ":" then
-		address = bit32.replace( tonumber("0x" .. address), skynet.harbor(skynet.self()), 24, 8)
+		address = tonumber("0x" .. address) | (skynet.harbor(skynet.self()) << 24)
 	end
 	return address
+end
+
+function COMMAND.list()
+	return skynet.call(".launcher", "lua", "LIST")
+end
+
+function COMMAND.stat()
+	return skynet.call(".launcher", "lua", "STAT")
+end
+
+function COMMAND.mem()
+	return skynet.call(".launcher", "lua", "MEM")
+end
+
+function COMMAND.kill(address)
+	return skynet.call(".launcher", "lua", "KILL", address)
+end
+
+function COMMAND.gc()
+	return skynet.call(".launcher", "lua", "GC")
 end
 
 function COMMAND.exit(address)
@@ -195,6 +221,24 @@ function COMMAND.info(address)
 	return skynet.call(address,"debug","INFO")
 end
 
+function COMMAND.debug(address, fd)
+	address = adjust_address(address)
+	local agent = skynet.newservice "debug_agent"
+	local stop
+	skynet.fork(function()
+		repeat
+			local cmdline = socket.readline(fd, "\n")
+			if not cmdline then
+				skynet.send(agent, "lua", "cmd", "cont")
+				break
+			end
+			skynet.send(agent, "lua", "cmd", cmdline)
+		until stop or cmdline == "cont"
+	end)
+	skynet.call(agent, "lua", "start", address, fd)
+	stop = true
+end
+
 function COMMAND.logon(address)
 	address = adjust_address(address)
 	core.command("LOGON", skynet.address(address))
@@ -203,4 +247,13 @@ end
 function COMMAND.logoff(address)
 	address = adjust_address(address)
 	core.command("LOGOFF", skynet.address(address))
+end
+
+function COMMAND.signal(address, sig)
+	address = skynet.address(adjust_address(address))
+	if sig then
+		core.command("SIGNAL", string.format("%s %d",address,sig))
+	else
+		core.command("SIGNAL", address)
+	end
 end

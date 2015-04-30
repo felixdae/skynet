@@ -4,7 +4,9 @@ local snax_interface = require "snax.interface"
 local snax = {}
 local typeclass = {}
 
-local G = { require = function() end }
+local interface_g = skynet.getenv("snax_interface_g")
+local G = interface_g and require (interface_g) or { require = function() end }
+interface_g = nil
 
 skynet.register_protocol {
 	name = "snax",
@@ -158,6 +160,10 @@ end
 function snax.hotfix(obj, source, ...)
 	local t = snax.interface(obj.type)
 	return test_result(skynet_call(obj.handle, "snax", t.system.hotfix, source, ...))
+end
+
+function snax.printf(fmt, ...)
+	skynet.error(string.format(fmt, ...))
 end
 
 return snax
