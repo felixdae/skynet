@@ -81,7 +81,7 @@ end
 
 local typedef = P {
 	"ALL",
-	FIELD = namedpat("field", (name * blanks * tag * blank0 * ":" * blank0 * (C"*")^0 * typename * mainkey^0)),
+	FIELD = namedpat("field", (name * blanks * tag * blank0 * ":" * blank0 * (C"*")^-1 * typename * mainkey^0)),
 	STRUCT = P"{" * multipat(V"FIELD" + V"TYPE") * P"}",
 	TYPE = namedpat("type", P"." * name * blank0 * V"STRUCT" ),
 	SUBPROTO = Ct((C"request" + C"response") * blanks * (typename + V"STRUCT")),
@@ -194,7 +194,7 @@ local function check_protocol(r)
 		local request = v.request
 		local response = v.response
 		local p = map[tag]
-		
+
 		if p then
 			error(string.format("redefined protocol tag %d at %s", tag, name))
 		end
@@ -340,9 +340,6 @@ local function packtype(name, t, alltypes)
 end
 
 local function packproto(name, p, alltypes)
---	if p.request == nil then
---		error(string.format("Protocol %s need request", name))
---	end
 	if p.request then
 		local request = alltypes[p.request]
 		if request == nil then

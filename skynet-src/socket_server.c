@@ -508,7 +508,7 @@ udp_socket_address(struct socket *s, const uint8_t udp_address[UDP_ADDRESS_SIZE]
 		memset(&sa->v6, 0, sizeof(sa->v6));
 		sa->s.sa_family = AF_INET6;
 		sa->v6.sin6_port = port;
-		memcpy(&sa->v6.sin6_addr, udp_address + 1 + sizeof(uint16_t), sizeof(sa->v6.sin6_addr));	// ipv4 address is 128 bits
+		memcpy(&sa->v6.sin6_addr, udp_address + 1 + sizeof(uint16_t), sizeof(sa->v6.sin6_addr)); // ipv6 address is 128 bits
 		return sizeof(sa->v6);
 	}
 	return 0;
@@ -687,7 +687,11 @@ send_socket(struct socket_server *ss, struct request_send * request, struct sock
 		so.free_func(request->buffer);
 		return -1;
 	}
-	assert(s->type != SOCKET_TYPE_PLISTEN && s->type != SOCKET_TYPE_LISTEN);
+	if (s->type == SOCKET_TYPE_PLISTEN || s->type == SOCKET_TYPE_LISTEN) {
+		fprintf(stderr, "socket-server: write to listen fd %d.\n", id);
+		so.free_func(request->buffer);
+		return -1;
+	}
 	if (send_buffer_empty(s) && s->type == SOCKET_TYPE_CONNECTED) {
 		if (s->protocol == PROTOCOL_TCP) {
 			int n = write(s->fd, so.buffer, so.sz);
@@ -700,6 +704,7 @@ send_socket(struct socket_server *ss, struct request_send * request, struct sock
 				default:
 					fprintf(stderr, "socket-server: write to %d (fd=%d) error :%s.\n",id,s->fd,strerror(errno));
 					force_close(ss,s,result);
+					so.free_func(request->buffer);
 					return SOCKET_CLOSE;
 				}
 			}
@@ -720,6 +725,7 @@ send_socket(struct socket_server *ss, struct request_send * request, struct sock
 				append_sendbuffer_udp(ss,s,priority,request,udp_address);
 			} else {
 				so.free_func(request->buffer);
+				return -1;
 			}
 		}
 		sp_write(ss->event_fd, s->fd, s, true);
@@ -887,6 +893,7 @@ add_udp_socket(struct socket_server *ss, struct request_udp *udp) {
 	if (ns == NULL) {
 		close(udp->fd);
 		ss->slot[HASH_ID(id)].type = SOCKET_TYPE_INVALID;
+		return;
 	}
 	ns->type = SOCKET_TYPE_CONNECTED;
 	memset(ns->p.udp_address, 0, sizeof(ns->p.udp_address));
@@ -1258,7 +1265,7 @@ send_request(struct socket_server *ss, struct request_package *request, char typ
 static int
 open_request(struct socket_server *ss, struct request_package *req, uintptr_t opaque, const char *addr, int port) {
 	int len = strlen(addr);
-	if (len + sizeof(req->u.open) > 256) {
+	if (len + sizeof(req->u.open) >= 256) {
 		fprintf(stderr, "socket-server : Invalid addr %s.\n",addr);
 		return -1;
 	}
@@ -1284,11 +1291,19 @@ socket_server_connect(struct socket_server *ss, uintptr_t opaque, const char * a
 	return request.u.open.id;
 }
 
+static void
+free_buffer(struct socket_server *ss, const void * buffer, int sz) {
+	struct send_object so;
+	send_object_init(ss, &so, (void *)buffer, sz);
+	so.free_func((void *)buffer);
+}
+
 // return -1 when error
 int64_t 
 socket_server_send(struct socket_server *ss, int id, const void * buffer, int sz) {
 	struct socket * s = &ss->slot[HASH_ID(id)];
 	if (s->id != id || s->type == SOCKET_TYPE_INVALID) {
+		free_buffer(ss, buffer, sz);
 		return -1;
 	}
 
@@ -1305,6 +1320,7 @@ void
 socket_server_send_lowpriority(struct socket_server *ss, int id, const void * buffer, int sz) {
 	struct socket * s = &ss->slot[HASH_ID(id)];
 	if (s->id != id || s->type == SOCKET_TYPE_INVALID) {
+		free_buffer(ss, buffer, sz);
 		return;
 	}
 
@@ -1487,6 +1503,7 @@ int64_t
 socket_server_udp_send(struct socket_server *ss, int id, const struct socket_udp_address *addr, const void *buffer, int sz) {
 	struct socket * s = &ss->slot[HASH_ID(id)];
 	if (s->id != id || s->type == SOCKET_TYPE_INVALID) {
+		free_buffer(ss, buffer, sz);
 		return -1;
 	}
 
@@ -1505,6 +1522,7 @@ socket_server_udp_send(struct socket_server *ss, int id, const struct socket_udp
 		addrsz = 1+2+16;	// 1 type, 2 port, 16 ipv6
 		break;
 	default:
+		free_buffer(ss, buffer, sz);
 		return -1;
 	}
 

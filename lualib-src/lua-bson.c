@@ -243,12 +243,16 @@ append_key(struct bson *bs, int type, const char *key, size_t sz) {
 	write_string(bs, key, sz);
 }
 
+static inline int
+is_32bit(int64_t v) {
+	return v >= INT32_MIN && v <= INT32_MAX;
+}
+
 static void
 append_number(struct bson *bs, lua_State *L, const char *key, size_t sz) {
 	if (lua_isinteger(L, -1)) {
 		int64_t i = lua_tointeger(L, -1);
-		int si = i >> 31;
-		if (si == 0 || si == -1) {
+		if (is_32bit(i)) {
 			append_key(bs, BSON_INT32, key, sz);
 			write_int32(bs, i);
 		} else {
@@ -1135,15 +1139,17 @@ lobjectid(lua_State *L) {
 		}
 	} else {
 		time_t ti = time(NULL);
+		// old_counter is a static var, use atom inc.
+		uint32_t id = __sync_fetch_and_add(&oid_counter,1);
+
 		oid[2] = (ti>>24) & 0xff;
 		oid[3] = (ti>>16) & 0xff;
 		oid[4] = (ti>>8) & 0xff;
 		oid[5] = ti & 0xff;
 		memcpy(oid+6 , oid_header, 5);
-		oid[11] = (oid_counter>>16) & 0xff; 
-		oid[12] = (oid_counter>>8) & 0xff; 
-		oid[13] = oid_counter & 0xff; 
-		++oid_counter;
+		oid[11] = (id>>16) & 0xff; 
+		oid[12] = (id>>8) & 0xff; 
+		oid[13] = id & 0xff;
 	}
 	lua_pushlstring( L, (const char *)oid, 14);
 
